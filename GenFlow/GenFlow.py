@@ -14,6 +14,8 @@ import openai
 from openai import OpenAI
 import inspect
 from typing import Union
+from composio_openai import ComposioToolSet, App, Action
+import textwrap
 
 # Load environment variables
 load_dotenv()
@@ -34,13 +36,7 @@ class GenFlow:
         self.env = jinja2.Environment()
         self.variables = {}    # For storing variables across nodes
         self.variable_producers = {}  # Maps variable names to node names
-
-        # Initialize OpenAI API key from environment variable
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
-        self.client = OpenAI(api_key=api_key)
-
+        self.client = OpenAI()
         logger.debug("GenFlow initialized.")
 
     def parse_yaml(self):
@@ -48,10 +44,17 @@ class GenFlow:
         Parses the YAML data and constructs nodes.
         """
         data = self.yaml_data
-        logger.info("Parsing YAML data")
+        logger.debug("Parsing YAML data")
         for node_data in data.get('nodes', []):
+            # Check if node is an llm_service node with tools
+            if node_data.get('type') == 'llm_service' and 'tools' in node_data:
+                tools = node_data['tools']
+                for i, tool in enumerate(tools):
+                    if tool.startswith('COMPOSIO.'):
+                        # Ensure 'composio_handle_tool_call' exists in functions.py
+                        self.ensure_composio_handle_tool_call_exists()
             node = Node(node_data)
-            logger.info(f"Adding node '{node.name}' of type '{node.type}'")
+            logger.debug(f"Adding node '{node.name}' of type '{node.type}'")
             if node.name in self.nodes:
                 raise ValueError(f"Duplicate node name '{node.name}' found.")
             self.nodes[node.name] = node
@@ -66,11 +69,50 @@ class GenFlow:
         # Build the execution graph
         self.build_graph()
 
+    def ensure_composio_handle_tool_call_exists(self):
+        """
+        Ensures that 'composio_handle_tool_call' function exists in functions.py.
+        If not, it appends the function definition to functions.py.
+        """
+
+        functions_py_path = 'functions.py'
+        function_name = 'composio_handle_tool_call'
+
+        # Check if functions.py exists
+        if not os.path.exists(functions_py_path):
+            # Create functions.py
+            with open(functions_py_path, 'w') as f:
+                f.write('')
+            logger.info(f"Created '{functions_py_path}'")
+
+        # Read functions.py content
+        with open(functions_py_path, 'r') as f:
+            functions_py_content = f.read()
+
+        # Check if function is already defined
+        if f'def {function_name}(' in functions_py_content:
+            logger.info(f"Function '{function_name}' already exists in '{functions_py_path}'")
+        else:
+            # Append the function definition
+            function_code = '''
+    from composio_openai import ComposioToolSet, App, Action
+
+    def composio_handle_tool_call(response):
+        composio_toolset = ComposioToolSet()
+        return composio_toolset.handle_tool_calls(response)
+    '''
+            # Dedent the function code
+            function_code = textwrap.dedent(function_code)
+
+            with open(functions_py_path, 'a') as f:
+                f.write('\n' + function_code)  # Ensure there's a newline before appending
+            logger.info(f"Appended function '{function_name}' to '{functions_py_path}'")
+
     def build_graph(self):
         """
         Builds the execution graph based on node dependencies.
         """
-        logger.info("Building execution graph")
+        logger.debug("Building execution graph")
         for node in self.nodes.values():
             self.graph.add_node(node.name)
             logger.debug(f"Added node '{node.name}' to graph")
@@ -111,7 +153,7 @@ class GenFlow:
 
             # Render parameters
             try:
-                logger.info(f"Rendering parameters for node '{node_name}'")
+                logger.debug(f"Rendering parameters for node '{node_name}'")
                 params = node.render_params(self.outputs, self.env)
                 logger.debug(f"Parameters for node '{node_name}': {params}")
             except Exception as e:
@@ -173,18 +215,6 @@ class Node:
         params = self.node_data.get('params', {})
         for value in params.values():
             dependencies.update(self.extract_dependencies_from_value(value))
-
-        # Handle specific dependencies for different node types
-        if self.type == 'get_variables':
-            # For get_variables nodes, add dependencies from 'variables' field
-            variables = self.node_data.get('variables', {})
-            for var_name in variables.values():
-                dependencies.add(var_name)
-        elif self.type == 'set_variable':
-            # For set_variable nodes, check if 'value' depends on any variables
-            value = params.get('value')
-            if value:
-                dependencies.update(self.extract_dependencies_from_value(value))
 
         return dependencies
 
@@ -278,17 +308,11 @@ class Node:
         Returns:
             dict: Outputs from the node execution.
         """
-        self.logger.debug(f"Executing node of type '{self.type}' with params: {params}")
+        self.logger.info(f"Executing node of type '{self.type}' with params: {params}")
         if self.type == 'function_call':
             return self.execute_function_call(params)
         elif self.type == 'llm_service':
             return self.execute_llm_service(params)
-        elif self.type == 'set_variable':
-            return self.execute_set_variable(params)
-        elif self.type == 'get_variable':
-            return self.execute_get_variable(params)
-        elif self.type == 'get_variables':
-            return self.execute_get_variables(params)
         else:
             raise NotImplementedError(f"Type '{self.type}' not implemented for node '{self.name}'.")
 
@@ -358,7 +382,6 @@ class Node:
             dict: Dictionary of outputs from the LLM service.
         """
         import inspect
-
         model = self.node_data.get('model')
         tools = self.node_data.get('tools')
         structured_output_schema_name = self.node_data.get('structured_output_schema')
@@ -377,26 +400,45 @@ class Node:
             # Prepare the function definitions
             function_definitions = []
             available_functions = {}
+            composio_tools=[]
             for tool_name in tools:
                 # Check if function exists in functions.py
-                try:
-                    module = importlib.import_module('functions')
-                    func = getattr(module, tool_name)
-                except ImportError as e:
-                    raise ImportError(f"Error importing module 'functions': {e}")
-                except AttributeError as e:
-                    raise AttributeError(f"Function '{tool_name}' not found in 'functions' module.")
+                if tool_name.split('.')[0]=='COMPOSIO':
+                    tool_name=tool_name.split('COMPOSIO.')[1]
+                    composio_toolset = ComposioToolSet()
+                    composio_tools.append(tool_name)
+                    self.logger.debug(f"Registering COMPOSIO tool for openai call: {tool_name}")
+                    try:
+                        function_schema = composio_toolset.get_tools(actions=[tool_name])[0]
+                    except Exception as e:
+                        print(e)
+                    try:
+                        module = importlib.import_module('functions')
+                        func = getattr(module, 'composio_handle_tool_call')
+                    except ImportError as e:
+                        raise ImportError(f"Error importing module 'functions': {e}")
+                    except AttributeError as e:
+                        raise AttributeError(f"Function 'composio_handle_tool_call' not found in 'functions' module.")
 
-                # Check if function has proper docstrings and type annotations
-                if not func.__doc__:
-                    raise ValueError(f"Function '{tool_name}' must have a docstring.")
-                signature = inspect.signature(func)
-                for param in signature.parameters.values():
-                    if param.annotation == inspect.Parameter.empty:
-                        raise ValueError(f"Parameter '{param.name}' in function '{func.__name__}' lacks type annotation.")
+                else:
+                    try:
+                        module = importlib.import_module('functions')
+                        func = getattr(module, tool_name)
+                    except ImportError as e:
+                        raise ImportError(f"Error importing module 'functions': {e}")
+                    except AttributeError as e:
+                        raise AttributeError(f"Function '{tool_name}' not found in 'functions' module.")
 
-                # Get the function schema from the function object
-                function_schema = get_function_schema(func)
+                    # Check if function has proper docstrings and type annotations
+                    if not func.__doc__:
+                        raise ValueError(f"Function '{tool_name}' must have a docstring.")
+                    signature = inspect.signature(func)
+                    for param in signature.parameters.values():
+                        if param.annotation == inspect.Parameter.empty:
+                            raise ValueError(f"Parameter '{param.name}' in function '{func.__name__}' lacks type annotation.")
+
+                    # Get the function schema from the function object
+                    function_schema = get_function_schema(func)
 
                 # Build the function definition
                 function_definitions.append(function_schema)
@@ -423,31 +465,38 @@ class Node:
                     function_to_call=available_functions[function_name]
                     if not function_to_call:
                         raise ValueError(f"Function '{function_name}' is not available.")
-                    function_args = tool_call.function.arguments
+                    if function_name in composio_tools:
+                        edited_response=response
+                        edited_response.choices[0].message.tool_calls=[tool_call]
+                        function_response = composio_toolset.handle_tool_calls(edited_response)
+                        edited_response.choices[0].message.tool_calls = tool_calls
+                        self.logger.debug(f"Executing COMPOSIO tool: {function_name}")
+                    else:
+                        function_args = tool_call.function.arguments
 
-                    # Parse the arguments
-                    try:
-                        arguments = json.loads(function_args)
-                    except json.JSONDecodeError as e:
-                        raise ValueError(f"Failed to parse function arguments: {e}")
+                        # Parse the arguments
+                        try:
+                            arguments = json.loads(function_args)
+                        except json.JSONDecodeError as e:
+                            raise ValueError(f"Failed to parse function arguments: {e}")
 
-                    # Get the function signature and call the function with given arguments
-                    try:
-                        sig = inspect.signature(function_to_call)
-                        call_args = {}
-                        for k, v in sig.parameters.items():
-                            if k in arguments:
-                                call_args[k] = arguments[k]
-                            elif v.default != inspect.Parameter.empty:
-                                call_args[k] = v.default
-                            else:
-                                raise ValueError(f"Missing required argument '{k}' for function '{function_name}'.")
+                        # Get the function signature and call the function with given arguments
+                        try:
+                            sig = inspect.signature(function_to_call)
+                            call_args = {}
+                            for k, v in sig.parameters.items():
+                                if k in arguments:
+                                    call_args[k] = arguments[k]
+                                elif v.default != inspect.Parameter.empty:
+                                    call_args[k] = v.default
+                                else:
+                                    raise ValueError(f"Missing required argument '{k}' for function '{function_name}'.")
 
-                        self.logger.info(f"Calling function '{function_name}' with arguments {call_args}")
-                        function_response = function_to_call(**call_args)
-                        self.logger.info(f"Function '{function_name}' returned: {function_response}")
-                    except Exception as e:
-                        raise Exception(f"Error executing function '{function_name}': {e}")
+                            self.logger.debug(f"Calling function '{function_name}' with arguments {call_args}")
+                            function_response = function_to_call(**call_args)
+                            self.logger.debug(f"Function '{function_name}' returned: {function_response}")
+                        except Exception as e:
+                            raise Exception(f"Error executing function '{function_name}': {e}")
 
                     # Append the function's response to messages
                     tool_message = {
@@ -456,6 +505,7 @@ class Node:
                         "name": function_name,
                         "content": str(function_response)
                     }
+                    print(f'tool message{tool_message}')
                     messages.append(tool_message)
 
                 # Call the model again to get the final response
@@ -533,58 +583,6 @@ class Node:
                     f"Node '{self.name}' expects {len(self.outputs)} outputs, but OpenAI service returned 1."
                 )
             return {self.outputs[0]: result}
-
-    def execute_set_variable(self, params):
-        """
-        Sets a variable in the flow's variable store.
-
-        Args:
-            params (dict): Should contain 'value'.
-
-        Returns:
-            dict: Empty dictionary as no outputs.
-        """
-        variable_name = self.node_data['variable_name']
-        value = params['value']
-        # Store the variable in the GenFlow's variable store
-        self.flow.variables[variable_name] = value
-        return {}
-
-    def execute_get_variable(self, params):
-        """
-        Retrieves a variable from the flow's variable store.
-
-        Args:
-            params (dict): Not used.
-
-        Returns:
-            dict: Dictionary containing the variable's value under the specified output name.
-        """
-        variable_name = self.node_data['variable_name']
-        value = self.flow.variables.get(variable_name)
-        if value is None:
-            raise ValueError(f"Variable '{variable_name}' not found.")
-        output_name = self.outputs[0] if self.outputs else 'value'
-        return {output_name: value}
-
-    def execute_get_variables(self, params):
-        """
-        Retrieves multiple variables from the flow's variable store.
-
-        Args:
-            params (dict): Not used.
-
-        Returns:
-            dict: Dictionary containing the variables' values under the specified output names.
-        """
-        variables = self.node_data['variables']  # This is a dict mapping output names to variable names
-        result = {}
-        for output_name, variable_name in variables.items():
-            value = self.flow.variables.get(variable_name)
-            if value is None:
-                raise ValueError(f"Variable '{variable_name}' not found.")
-            result[output_name] = value
-        return result
 
 def get_function_schema(func):
     """

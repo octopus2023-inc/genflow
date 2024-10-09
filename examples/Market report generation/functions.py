@@ -112,3 +112,13 @@ def spider_cloud_scrape(url):
         markdown = "Error: " + str(e)
 
     return markdown
+
+    
+
+
+
+from composio_openai import ComposioToolSet, App, Action
+
+def composio_handle_tool_call(response):
+    composio_toolset = ComposioToolSet()
+    return composio_toolset.handle_tool_calls(response)

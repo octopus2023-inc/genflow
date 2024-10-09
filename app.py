@@ -4,11 +4,9 @@ import dash
 from dash import html, dcc, Input, Output, State
 import dash_cytoscape as cyto
 import os
-import yaml
 import graph_builder
 import inspect
-import functions  # Your functions.py
-import structured_output_schema  # Your structured_output_schema.py
+from examples import functions, structured_output_schema
 import logging
 
 # Configure logger
@@ -50,7 +48,7 @@ default_stylesheet = [
          'border-color': '#fff'
      }},
     {'selector': '.output-node',
-     'style': {'shape': 'star', 'border-width': '2px', 'border-color': '#fff'}},
+     'style': {'shape': 'triangle', 'border-width': '2px', 'border-color': '#fff'}},
     {'selector': 'edge',
      'style': {
          'curve-style': 'bezier',
@@ -67,7 +65,7 @@ default_stylesheet = [
 ]
 
 # Build the initial graph elements
-yaml_file = 'sample.yaml'  # Ensure this is the correct YAML file
+yaml_file = 'examples/Market report generation/sample.yaml'  # Ensure this is the correct YAML file
 try:
     elements = graph_builder.build_graph_data(yaml_file)
     logger.debug(f"Elements being passed to Cytoscape:\n{elements}")
@@ -270,16 +268,21 @@ def display_node_data(data):
         if node_type == 'function_call':
             func_name = data.get('function', '')
             if func_name:
-                func = getattr(functions, func_name, None)
-                if func:
-                    try:
-                        source = inspect.getsource(func)
-                        content.append(html.H5(f"Function: {func_name}", style={'color': '#fff'}))
-                        content.append(html.Pre(source, style={'color': '#fff', 'backgroundColor': '#333', 'padding': '10px'}))
-                    except OSError:
-                        content.append(html.P(f"Source code for function '{func_name}' not available.", style={'color': '#fff'}))
+                if func_name.startswith('COMPOSIO.'):
+                    # It's a COMPOSIO function
+                    content.append(html.H5(f"Function: {func_name}", style={'color': '#fff'}))
+                    content.append(html.P("This is a COMPOSIO function.", style={'color': '#fff'}))
                 else:
-                    content.append(html.P(f"Function '{func_name}' not found in 'functions.py'.", style={'color': '#fff'}))
+                    func = getattr(functions, func_name, None)
+                    if func:
+                        try:
+                            source = inspect.getsource(func)
+                            content.append(html.H5(f"Function: {func_name}", style={'color': '#fff'}))
+                            content.append(html.Pre(source, style={'color': '#fff', 'backgroundColor': '#333', 'padding': '10px'}))
+                        except OSError:
+                            content.append(html.P(f"Source code for function '{func_name}' not available.", style={'color': '#fff'}))
+                    else:
+                        content.append(html.P(f"Function '{func_name}' not found in 'functions.py'.", style={'color': '#fff'}))
             else:
                 content.append(html.P("No function associated with this node.", style={'color': '#fff'}))
 
@@ -292,16 +295,20 @@ def display_node_data(data):
                 for tool_name in tools:
                     if not tool_name:
                         continue  # Skip empty tool names
-                    func = getattr(functions, tool_name, None)
-                    if func:
-                        try:
-                            source = inspect.getsource(func)
-                            content.append(html.P(f"Function: {tool_name}", style={'color': '#fff'}))
-                            content.append(html.Pre(source, style={'color': '#fff', 'backgroundColor': '#333', 'padding': '10px'}))
-                        except OSError:
-                            content.append(html.P(f"Source code for function '{tool_name}' not available.", style={'color': '#fff'}))
+                    if tool_name.startswith('COMPOSIO.'):
+                        # It's a COMPOSIO function
+                        content.append(html.P(f"COMPOSIO Function: {tool_name}", style={'color': '#fff'}))
                     else:
-                        content.append(html.P(f"Function '{tool_name}' not found in 'functions.py'.", style={'color': '#fff'}))
+                        func = getattr(functions, tool_name, None)
+                        if func:
+                            try:
+                                source = inspect.getsource(func)
+                                content.append(html.P(f"Function: {tool_name}", style={'color': '#fff'}))
+                                content.append(html.Pre(source, style={'color': '#fff', 'backgroundColor': '#333', 'padding': '10px'}))
+                            except OSError:
+                                content.append(html.P(f"Source code for function '{tool_name}' not available.", style={'color': '#fff'}))
+                        else:
+                            content.append(html.P(f"Function '{tool_name}' not found in 'functions.py'.", style={'color': '#fff'}))
 
             if structured_output_schema_name:
                 schema = getattr(structured_output_schema, structured_output_schema_name, None)

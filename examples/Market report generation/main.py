@@ -7,19 +7,21 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("app.log", mode='w'),
+        logging.FileHandler("../../app.log", mode='w'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-from gensphere_python_sdk.GenFlow.GenFlow import GenFlow
-from gensphere_python_sdk.GenFlow.yml_compose import YmlCompose
+from GenFlow.GenFlow import GenFlow
+from GenFlow.yml_compose import YmlCompose
 import pprint
-
+from dotenv import load_dotenv
+import os
 
 if __name__ == '__main__':
     # Compose the YAML files into one combined data structure
+    load_dotenv()
     try:
         composer = YmlCompose('sample.yaml')
         combined_yaml_data = composer.compose(save_combined_yaml=True, output_file='combined.yaml')

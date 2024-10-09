@@ -31,7 +31,7 @@ nodes:
     model: "gpt-4o-2024-08-06"
     tools:
       - get_exchange_rate
-      - search_internet
+      - COMPOSIO.TAVILY_TAVILY_SEARCH
     params:
       prompt: |
         You need to do three things.
@@ -51,3 +51,15 @@ nodes:
       prompt: "Generate a summary report based on the analysis: {{ analyze_data.analysis_result }}"
     outputs:
       - report
+
+  - name: send_email
+    type: llm_service
+    service: openai
+    model: "gpt-4o-2024-08-06"
+    tools:
+      - COMPOSIO.GMAIL_SEND_EMAIL
+    params:
+      prompt: |
+          Send an email containing with a detailed explanation about {{generate_report.report}} to your_email@gmail.com
+    outputs:
+        - email_sent

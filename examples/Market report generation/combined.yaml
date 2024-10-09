@@ -1,0 +1,68 @@
+nodes:
+- function: read_csv_file
+  name: read_csv
+  outputs:
+  - data
+  params:
+    file_path: data.csv
+  type: function_call
+- function: process_csv_data
+  name: data_processing__process_data_step
+  outputs:
+  - processed_data
+  params:
+    data: '{{ read_csv.data }}'
+  type: function_call
+- function: format_analysis_request
+  name: prepare_analysis
+  outputs:
+  - analysis_prompt
+  params:
+    processed_data: '{{ data_processing__process_data_step.processed_data }}'
+  type: function_call
+- model: gpt-4o-2024-08-06
+  name: analyze_data
+  outputs:
+  - analysis_result
+  params:
+    prompt: 'You need to do three things.
+
+      1- Find a major new headline that happened in Brazil
+
+      2- Get the exchange rate from BRL to USD
+
+      3- analyze the table {{ prepare_analysis.analysis_prompt }}
+
+      4- In this table, value1, value2 refer to value of items in USD. Convert that
+      to BRL, and add new columns with BRL price. Rename the other columns to USD
+      price. Answer in table format
+
+      '
+  service: openai
+  tools:
+  - get_exchange_rate
+  - COMPOSIO.TAVILY_TAVILY_SEARCH
+  type: llm_service
+- model: gpt-4o-2024-08-06
+  name: generate_report
+  outputs:
+  - report
+  params:
+    prompt: 'Generate a summary report based on the analysis: {{ analyze_data.analysis_result
+      }}'
+  service: openai
+  structured_output_schema: ReportSchema
+  type: llm_service
+- model: gpt-4o-2024-08-06
+  name: send_email
+  outputs:
+  - email_sent
+  params:
+    prompt: 'Send an email containing with a detailed explanation about {{generate_report.report}}
+      to dwfalves@gmail.com
+
+      '
+  service: openai
+  tools:
+  - COMPOSIO.GMAIL_SEND_EMAIL
+  type: llm_service
