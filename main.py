@@ -1,6 +1,8 @@
 # main.py
 
 import logging
+import traceback
+
 
 # Set up logging configuration before importing other modules
 logging.basicConfig(
@@ -11,9 +13,12 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger(__name__)
+
+#logger = logging.getLogger(__name__)
 
 from GenFlow.GenFlow import GenFlow
+logger = logging.getLogger('GenFlow')
+
 from GenFlow.yml_compose import YmlCompose
 import pprint
 from dotenv import load_dotenv
@@ -47,3 +52,4 @@ if __name__ == '__main__':
 
     except Exception as e:
         logger.error(f"An error occurred during flow execution: {e}")
+        logger.error(traceback.format_exc())

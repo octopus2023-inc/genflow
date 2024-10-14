@@ -42,7 +42,13 @@ nodes:
     outputs:
       - analysis_result
 
-  - name: get_brazil_startups
+  - name: countries_list
+    type: function_call
+    function: countries_list
+    outputs:
+      - countries_list
+
+  - name: get_world_startups
     type: llm_service
     service: openai
     model: "gpt-4o-2024-08-06"
@@ -50,9 +56,9 @@ nodes:
         - LANGCHAIN.TavilySearchResults
     params:
         prompt: |
-          You need to find what are the most interesting startups in AI coming fom Brazil.
+          You need to find what are the most interesting startups in AI coming from {{ countries_list.countries_list[i] }}.
     outputs:
-        - brazil_startups
+        - world_startups
 
   - name: generate_report
     type: llm_service
@@ -60,7 +66,7 @@ nodes:
     model: "gpt-4o-2024-08-06"
     structured_output_schema: ReportSchema
     params:
-      prompt: "Generate a summary report based on the analysis: {{ analyze_data.analysis_result }} and {{ get_brazil_startups.brazil_startups }}"
+      prompt: "Generate a summary report based on the analysis: {{ analyze_data.analysis_result }} and {{ get_world_startups.world_startups }}"
     outputs:
       - report
 

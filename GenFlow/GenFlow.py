@@ -16,7 +16,7 @@ from composio_openai import ComposioToolSet, App, Action
 from langchain_core.utils.function_calling import convert_to_openai_function
 import textwrap
 # Import YmlCompose
-from yml_compose import YmlCompose
+from GenFlow.yml_compose import YmlCompose
 
 # Load environment variables
 load_dotenv()
@@ -88,6 +88,7 @@ class GenFlow:
         # Validate the YAML data before parsing
 
         self.validate_yaml(self.yaml_data, self.yaml_file)
+        logger.info(f"yaml file {self.yaml_file} passed all validation steps")
 
         # Check if there are any 'yml_flow' nodes
         if self.has_yml_flow_nodes(self.yaml_data):
@@ -200,7 +201,7 @@ class GenFlow:
                 if 'tools' in node_data:
                     tools = node_data['tools']
                     for i, tool in enumerate(tools):
-                        # Validate if COMPOSIO tools are valid
+                        # Check if COMPOSIO tools are valid
                         if tool.startswith('COMPOSIO.'):
                             tool_name = tool.split('COMPOSIO.')[1]
                             composio_toolset = ComposioToolSet()
@@ -208,9 +209,9 @@ class GenFlow:
                                 _ = composio_toolset.get_tools(actions=[tool_name])[0]
                             except Exception as e:
                                 print(f"COMPOSIO tool {tool_name} not valid. Please check COMPOSIO documentation for valid tools. \n COMPOSIO error message: {e}")
-                        # Validate if LANGCHAIN tools are valid
+                        # Check if LANGCHAIN tools are valid
                         elif tool.startswith('LANGCHAIN.'):
-                            tool_name = tool_name.split('LANGCHAIN.')[1]
+                            tool_name = tool.split('LANGCHAIN.')[1]
                             module = importlib.import_module('langchain_community.tools')
                             try:
                                 _ = getattr(module, tool_name)
@@ -296,7 +297,6 @@ class GenFlow:
         if not nx.is_directed_acyclic_graph(temp_graph):
             raise ValueError(f"The workflow graph in YAML file '{yaml_file}' has cycles.")
 
-        logger.info(f"YAML file {yaml_file} passed all validation checks.")
 
     def collect_used_params(self, yaml_data) -> Set[str]:
         """
@@ -439,30 +439,51 @@ class GenFlow:
                 params = node.render_params(self.outputs, self.env)
                 logger.debug(f"Parameters for node '{node_name}': {params}")
             except Exception as e:
-                logger.error(f"Error rendering params for node '{node_name}': {e}")
+                raise Exception(f"Error rendering params for node '{node_name}': {e}")
                 traceback.print_exc()
-                continue  # Skip execution of this node
 
             # Execute node
             try:
                 logger.info(f"Executing node '{node_name}'")
-                outputs = node.execute(params)
-                # Validate outputs
-                if not isinstance(outputs, dict):
-                    raise ValueError(f"Node '{node_name}' did not return a dictionary of outputs.")
-                expected_outputs = set(node.outputs)
-                actual_outputs = set(outputs.keys())
-                if expected_outputs != actual_outputs:
-                    raise ValueError(
-                        f"Node '{node_name}' outputs {actual_outputs} do not match expected outputs {expected_outputs}."
-                    )
-                # Save outputs
-                self.outputs[node_name] = outputs
-                logger.info(f"Outputs of node '{node_name}': {outputs}")
+                if isinstance(params, list):
+                    # We need to execute the node multiple times
+                    outputs_list = []
+                    for param_set in params:
+                        output = node.execute(param_set)
+                        # Validate output
+                        if not isinstance(output, dict):
+                            raise ValueError(f"Node '{node_name}' did not return a dictionary of outputs.")
+                        expected_outputs = set(node.outputs)
+                        actual_outputs = set(output.keys())
+                        if expected_outputs != actual_outputs:
+                            raise ValueError(
+                                f"Node '{node_name}' outputs {actual_outputs} do not match expected outputs {expected_outputs}."
+                            )
+                        outputs_list.append(output)
+                    # Combine outputs
+                    combined_outputs = {}
+                    for output_name in node.outputs:
+                        combined_outputs[output_name] = [output[output_name] for output in outputs_list]
+                    # Save outputs as lists
+                    self.outputs[node_name] = combined_outputs
+                    logger.debug(f"Outputs of node '{node_name}': {combined_outputs}")
+                else:
+                    outputs = node.execute(params)
+                    # Validate outputs
+                    if not isinstance(outputs, dict):
+                        raise ValueError(f"Node '{node_name}' did not return a dictionary of outputs.")
+                    expected_outputs = set(node.outputs)
+                    actual_outputs = set(outputs.keys())
+                    if expected_outputs != actual_outputs:
+                        raise ValueError(
+                            f"Node '{node_name}' outputs {actual_outputs} do not match expected outputs {expected_outputs}."
+                        )
+                    # Save outputs
+                    logger.debug(f"Saving Outputs of node '{node_name}': {outputs}")
+                    self.outputs[node_name] = outputs
             except Exception as e:
-                logger.error(f"Error executing node '{node_name}': {e}")
+                raise Exception(f"Error executing node '{node_name}': {e}")
                 traceback.print_exc()
-                continue  # Skip saving outputs for this node
 
 class Node:
     """
@@ -529,45 +550,145 @@ class Node:
             env (jinja2.Environment): Jinja2 environment for templating.
 
         Returns:
-            dict: Rendered parameters ready for execution.
+            dict or list of dicts: Rendered parameters ready for execution.
         """
+        import copy
+        import re
+
         params = self.node_data.get('params', {})
         # Build the context with outputs accessible by node name
         context = {}
         for node_name, node_outputs in outputs.items():
             context[node_name] = node_outputs
-        # Render each parameter individually
-        rendered_params = {}
+
+        # Initialize variables
+        indexed_params = {}
+        iterables = {}
+        # Collect all indexed references and their iterables
         for key, value in params.items():
             if isinstance(value, str):
-                # Check if the value is a simple variable reference
-                import re
-                simple_var_pattern = r"^\{\{\s*([\w_\.]+)\s*\}\}$"
-                match = re.match(simple_var_pattern, value)
-                if match:
-                    var_name = match.group(1)
-                    # Split var_name to access nested variables
+                # Check for indexed references
+                indexed_var_pattern = r"\{\{\s*([\w_\.]+)\[(.*?)\]\s*\}\}"
+                matches = re.findall(indexed_var_pattern, value)
+                if matches:
+                    indexed_params[key] = matches  # Store matches for this parameter
+                    for var_name, index_expr in matches:
+                        var_parts = var_name.split('.')
+                        obj = context
+                        try:
+                            for part in var_parts:
+                                if isinstance(obj, dict):
+                                    obj = obj[part]
+                                else:
+                                    obj = getattr(obj, part)
+                            # obj should now be the iterable
+                            if not hasattr(obj, '__iter__'):
+                                raise ValueError(f"Variable '{var_name}' is not iterable.")
+                            iterables[var_name] = obj
+                        except (KeyError, AttributeError, TypeError) as e:
+                            raise ValueError(f"Variable '{var_name}' not found in context.") from e
+
+        if indexed_params:
+            # Handle parameters with indexed references
+            max_length = max(len(it) for it in iterables.values())
+            rendered_params_list = []
+            for i in range(max_length):
+                # Build a context for this iteration
+                iter_context = copy.deepcopy(context)
+                # Update iter_context with current index values
+                for var_name, iterable in iterables.items():
                     var_parts = var_name.split('.')
-                    obj = context
-                    try:
-                        for part in var_parts:
-                            if isinstance(obj, dict):
-                                obj = obj[part]
+                    # Get value at index i or None if out of range
+                    value = iterable[i] if i < len(iterable) else None
+                    self.set_in_context(iter_context, var_parts, value)
+                # Render parameters
+                rendered_params = {}
+                for key, value in params.items():
+                    if isinstance(value, str):
+                        # Replace indexed references in the parameter
+                        param_value = value
+                        matches = indexed_params.get(key, [])
+                        for var_name, index_expr in matches:
+                            var_parts = var_name.split('.')
+                            var_value = iter_context
+                            try:
+                                for part in var_parts:
+                                    if isinstance(var_value, dict):
+                                        var_value = var_value[part]
+                                    else:
+                                        var_value = getattr(var_value, part)
+                            except (KeyError, AttributeError, TypeError):
+                                var_value = None
+                            full_ref = f"{{{{ {var_name}[{index_expr}] }}}}"
+                            param_value = param_value.replace(full_ref, str(var_value))
+                        # Render any remaining templates
+                        template = env.from_string(param_value)
+                        if self.type == 'llm_service' and key == 'prompt':
+                            # Convert variables to strings in context
+                            string_iter_context = {k: str(v) if not isinstance(v, str) else v for k, v in
+                                                   iter_context.items()}
+                            rendered_value = template.render(**string_iter_context)
+                        else:
+                            rendered_value = template.render(**iter_context)
+                        rendered_params[key] = rendered_value
+                    else:
+                        rendered_params[key] = value
+                rendered_params_list.append(rendered_params)
+            return rendered_params_list
+        else:
+            # No indexed parameters, proceed as before
+            rendered_params = {}
+            for key, value in params.items():
+                if isinstance(value, str):
+                    # Check if the value is a simple variable reference
+                    simple_var_pattern = r"^\{\{\s*([\w_\.]+)\s*\}\}$"
+                    match = re.match(simple_var_pattern, value)
+                    if match:
+                        var_name = match.group(1)
+                        var_parts = var_name.split('.')
+                        obj = context
+                        try:
+                            for part in var_parts:
+                                if isinstance(obj, dict):
+                                    obj = obj[part]
+                                else:
+                                    obj = getattr(obj, part)
+                            if self.type == 'llm_service' and key == 'prompt':
+                                rendered_params[key] = str(obj)
                             else:
-                                obj = getattr(obj, part)
-                        rendered_params[key] = obj
-                    except (KeyError, AttributeError, TypeError) as e:
-                        # Variable not found in context
-                        raise ValueError(f"Variable '{var_name}' not found in context.") from e
+                                rendered_params[key] = obj
+                        except (KeyError, AttributeError, TypeError) as e:
+                            raise ValueError(f"Variable '{var_name}' not found in context.") from e
+                    else:
+                        template = env.from_string(value)
+                        if self.type == 'llm_service' and key == 'prompt':
+                            # Convert variables to strings in context
+                            string_context = {k: str(v) if not isinstance(v, str) else v for k, v in context.items()}
+                            rendered_value = template.render(**string_context)
+                        else:
+                            rendered_value = template.render(**context)
+                        rendered_params[key] = rendered_value
                 else:
-                    # Use Jinja2 rendering for other cases
-                    template = env.from_string(value)
-                    rendered_value = template.render(**context)
-                    rendered_params[key] = rendered_value
+                    rendered_params[key] = value
+            return rendered_params
+
+    # Helper function
+    def set_in_context(self,context, var_parts, value):
+        obj = context
+        for part in var_parts[:-1]:
+            if isinstance(obj, dict):
+                if part not in obj:
+                    obj[part] = {}
+                obj = obj[part]
             else:
-                # Non-string params are used as is
-                rendered_params[key] = value
-        return rendered_params
+                if not hasattr(obj, part):
+                    setattr(obj, part, {})
+                obj = getattr(obj, part)
+        last_part = var_parts[-1]
+        if isinstance(obj, dict):
+            obj[last_part] = value
+        else:
+            setattr(obj, last_part, value)
 
     def execute(self, params):
         """
@@ -579,7 +700,7 @@ class Node:
         Returns:
             dict: Outputs from the node execution.
         """
-        self.logger.info(f"Executing node of type '{self.type}' with params: {params}")
+        self.logger.debug(f"Executing node of type '{self.type}' with params: {params}")
         if self.type == 'function_call':
             return self.execute_function_call(params)
         elif self.type == 'llm_service':
@@ -606,12 +727,7 @@ class Node:
             raise AttributeError(f"Function '{self.node_data['function']}' not found in 'functions' module.")
 
         # Check if function has proper docstrings and type annotations
-        if not func.__doc__:
-            raise ValueError(f"Function '{self.node_data['function']}' must have a docstring.")
         signature = inspect.signature(func)
-        for param in signature.parameters.values():
-            if param.annotation == inspect.Parameter.empty:
-                raise ValueError(f"Parameter '{param.name}' in function '{func.__name__}' lacks type annotation.")
 
         # Execute function with parameters
         result = func(**params)
@@ -679,7 +795,7 @@ class Node:
                     tool_name=tool_name.split('COMPOSIO.')[1]
                     composio_toolset = ComposioToolSet()
                     composio_tools.append(tool_name)
-                    self.logger.info(f"Registering COMPOSIO tool for openai call: {tool_name}")
+                    self.logger.debug(f"Registering COMPOSIO tool for openai call: {tool_name}")
                     try:
                         function_schema = composio_toolset.get_tools(actions=[tool_name])[0]
                     except Exception as e:
@@ -696,13 +812,12 @@ class Node:
                         langchain_tool = getattr(module, tool_name)
                     except Exception as e:
                             print(f"Unable to import {tool_name} from langchain_community.tools. Please check Langchain's documentation.\n Langchain error message: {e}")
-                    self.logger.info(f"Registering LANGCHAIN tool for openai call: {tool_name}")
+                    self.logger.debug(f"Registering LANGCHAIN tool for openai call: {tool_name}")
                     langchain_tool_instance=langchain_tool()
                     langchain_openai_function_format=convert_to_openai_function(langchain_tool_instance)
                     function_schema={'type':'function','function':langchain_openai_function_format}
                     tool_name=function_schema['function']['name']
                     langchain_tools.append(tool_name)
-                    self.logger.info(f"Langchain function schema: {function_schema}")
                     run_langchain_tool=lambda x: langchain_tool_instance.invoke(x)
                     func=run_langchain_tool
                 else:
@@ -775,9 +890,9 @@ class Node:
                                     call_args[k] = v.default
                                 else:
                                     raise ValueError(f"Missing required argument '{k}' for function '{function_name}'.")
-                            self.logger.info(f"Calling function '{function_name}' with arguments {call_args}")
+                            self.logger.debug(f"Calling function '{function_name}' with arguments {call_args}")
                             function_response = function_to_call(**call_args)
-                            self.logger.info(f"Function '{function_name}' returned: {function_response}")
+                            self.logger.debug(f"Function '{function_name}' returned: {function_response}")
                         except Exception as e:
                             raise Exception(f"Error executing function '{function_name}': {e}")
 
@@ -884,7 +999,7 @@ class Node:
 
         edited_response = tool_call_response
         edited_response.choices[0].message.tool_calls = [tool_call]
-        self.logger.info(f"Executing COMPOSIO tool: {function_name}")
+        self.logger.debug(f"Executing COMPOSIO tool: {function_name}")
         function_response = function_to_call(edited_response)
         edited_response.choices[0].message.tool_calls = tool_calls
 
@@ -907,11 +1022,11 @@ class Node:
             arguments = json.loads(function_args)
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse function arguments: {e}")
-        self.logger.info(f"Executing langchain tool '{function_name}'.")
+        self.logger.debug(f"Executing langchain tool '{function_name}'.")
         try:
-            self.logger.info(f"Calling function '{function_name}' with arguments {arguments}")
+            self.logger.debug(f"Calling function '{function_name}' with arguments {arguments}")
             function_response = function_to_call(arguments)
-            self.logger.info(f"Langchain function '{function_name}' returned: {function_response}")
+            self.logger.debug(f"Langchain function '{function_name}' returned: {function_response}")
             return function_response
         except Exception as e:
             raise Exception(f"Error executing langchain function '{function_name}': {e}")

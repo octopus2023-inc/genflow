@@ -43,13 +43,19 @@ nodes:
   - get_exchange_rate
   - COMPOSIO.TAVILY_TAVILY_SEARCH
   type: llm_service
-- model: gpt-4o-2024-08-06
-  name: get_brazil_startups
+- function: countries_list
+  name: countries_list
   outputs:
-  - brazil_startups
+  - countries_list
+  params: {}
+  type: function_call
+- model: gpt-4o-2024-08-06
+  name: get_world_startups
+  outputs:
+  - world_startups
   params:
     prompt: 'You need to find what are the most interesting startups in AI coming
-      fom Brazil.
+      from {{ countries_list.countries_list[i] }}.
 
       '
   service: openai
@@ -62,7 +68,7 @@ nodes:
   - report
   params:
     prompt: 'Generate a summary report based on the analysis: {{ analyze_data.analysis_result
-      }} and {{ get_brazil_startups.brazil_startups }}'
+      }} and {{ get_world_startups.world_startups }}'
   service: openai
   structured_output_schema: ReportSchema
   type: llm_service

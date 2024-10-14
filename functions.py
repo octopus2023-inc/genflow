@@ -35,6 +35,7 @@ def process_csv_data(data: pd.DataFrame) -> Dict[str, Dict]:
         dict: A dictionary with the key 'processed_data' containing processed results.
     """
     print("Processing CSV data")
+    print(data)
     # Example processing: calculate mean of numeric columns
     processed_data = data.mean(numeric_only=True).to_dict()
     return {'processed_data': processed_data}
@@ -113,3 +114,7 @@ def spider_cloud_scrape(url):
 
     return markdown
 
+def countries_list():
+    import pandas as pd
+    brazil=pd.DataFrame([['brazil','rio de janeiro'],['brazil','sao paulo']],columns=['country','city'])
+    return {'countries_list':[brazil,'Indonesia','Russia','China','South Africa']}
