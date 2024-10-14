@@ -78,6 +78,6 @@ nodes:
   #    - COMPOSIO.GMAIL_SEND_EMAIL
   #  params:
   #    prompt: |
-  #        Send an email containing with a detailed explanation about {{generate_report.report}} to dwfalves@gmail.com
+  #        Send an email containing with a detailed explanation about {{generate_report.report}} to xyz@gmail.com
   #  outputs:
   #      - email_sent
