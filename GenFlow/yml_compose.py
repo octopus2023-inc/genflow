@@ -6,10 +6,8 @@ import logging
 import re
 
 # Module-level logger
-print('name is')
-print(__name__)
 logger = logging.getLogger(__name__)
-print(logger)
+
 
 class YmlCompose:
     """

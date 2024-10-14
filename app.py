@@ -65,7 +65,7 @@ default_stylesheet = [
 ]
 
 # Build the initial graph elements
-yaml_file = 'examples/Market report generation/sample.yaml'  # Ensure this is the correct YAML file
+yaml_file = 'examples/Market_report_generation/sample.yaml'  # Ensure this is the correct YAML file
 try:
     elements = graph_builder.build_graph_data(yaml_file)
     logger.debug(f"Elements being passed to Cytoscape:\n{elements}")

@@ -1,0 +1,77 @@
+# sample.yaml
+
+nodes:
+  - name: read_csv
+    type: function_call
+    function: read_csv_file
+    params:
+      file_path: "data.csv"
+    outputs:
+      - data
+
+  - name: data_processing
+    type: yml_flow
+    yml_file: data_processing_flow.yaml
+    params:
+      data: "{{ read_csv.data }}"
+    outputs:
+      - processed_data
+
+  - name: prepare_analysis
+    type: function_call
+    function: format_analysis_request
+    params:
+      processed_data: "{{ data_processing.processed_data }}"
+    outputs:
+      - analysis_prompt
+
+  - name: analyze_data
+    type: llm_service
+    service: openai
+    model: "gpt-4o-2024-08-06"
+    tools:
+      - get_exchange_rate
+      - COMPOSIO.TAVILY_TAVILY_SEARCH
+    params:
+      prompt: |
+        You need to do three things.
+        1- Find a major new headline that happened in Brazil
+        2- Get the exchange rate from BRL to USD
+        3- analyze the table {{ prepare_analysis.analysis_prompt }}
+        4- In this table, value1, value2 refer to value of items in USD. Convert that to BRL, and add new columns with BRL price. Rename the other columns to USD price. Answer in table format
+    outputs:
+      - analysis_result
+
+  - name: get_brazil_startups
+    type: llm_service
+    service: openai
+    model: "gpt-4o-2024-08-06"
+    tools:
+        - LANGCHAIN.TavilySearchResults
+    params:
+        prompt: |
+          You need to find what are the most interesting startups in AI coming fom Brazil.
+    outputs:
+        - brazil_startups
+
+  - name: generate_report
+    type: llm_service
+    service: openai
+    model: "gpt-4o-2024-08-06"
+    structured_output_schema: ReportSchema
+    params:
+      prompt: "Generate a summary report based on the analysis: {{ analyze_data.analysis_result }} and {{ get_brazil_startups.brazil_startups }}"
+    outputs:
+      - report
+
+  #- name: send_email
+  #  type: llm_service
+  #  service: openai
+  #  model: "gpt-4o-2024-08-06"
+  #  tools:
+  #    - COMPOSIO.GMAIL_SEND_EMAIL
+  #  params:
+  #    prompt: |
+  #        Send an email containing with a detailed explanation about {{generate_report.report}} to dwfalves@gmail.com
+  #  outputs:
+  #      - email_sent

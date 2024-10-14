@@ -31,7 +31,7 @@ if __name__ == '__main__':
         pprint.pprint(combined_yaml_data)
 
         # Initialize GenFlow with the combined YAML data
-        flow = GenFlow(combined_yaml_data)
+        flow = GenFlow('combined.yaml')
         flow.parse_yaml()
 
         # Log the nodes parsed
