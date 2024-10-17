@@ -5,7 +5,7 @@ import os
 import logging
 from typing import Optional
 import yaml
-from Gensphere.YmlUtils import validate_yaml
+from gensphere.yaml_utils import validate_yaml
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

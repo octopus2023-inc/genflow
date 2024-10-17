@@ -16,10 +16,10 @@ logging.basicConfig(
 
 #logger = logging.getLogger(__name__)
 
-from GenSphere.GenFlow import GenFlow
-logger = logging.getLogger('GenSphere')
+from gensphere.genflow import GenFlow
+logger = logging.getLogger('gensphere')
 
-from GenSphere.YmlUtils import YmlCompose
+from gensphere.yaml_utils import YmlCompose
 import pprint
 from dotenv import load_dotenv
 import os
@@ -28,15 +28,15 @@ if __name__ == '__main__':
     # Compose the YAML files into one combined data structure
     load_dotenv()
     try:
-        composer = YmlCompose('sample.yaml')
+        composer = YmlCompose('sample.yaml','functions','structured_output_schema')
         combined_yaml_data = composer.compose(save_combined_yaml=True, output_file='combined.yaml')
 
         # Log the combined YAML data
         logger.info("Combined YAML Data:")
         pprint.pprint(combined_yaml_data)
 
-        # Initialize GenSphere with the combined YAML data
-        flow = GenFlow('combined.yaml')
+        # Initialize gensphere with the combined YAML data
+        flow = GenFlow('combined.yaml','functions','structured_output_schema')
         flow.parse_yaml()
 
         # Log the nodes parsed

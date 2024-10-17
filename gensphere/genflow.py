@@ -16,7 +16,7 @@ from composio_openai import ComposioToolSet, App, Action
 from langchain_core.utils.function_calling import convert_to_openai_function
 import textwrap
 # Import YmlCompose and validate_yaml
-from GenSphere.YmlUtils import YmlCompose, load_yaml_file, has_yml_flow_nodes, validate_yaml
+from gensphere.yaml_utils import YmlCompose, load_yaml_file, has_yml_flow_nodes, validate_yaml
 
 # Load environment variables
 load_dotenv()
@@ -40,7 +40,7 @@ class GenFlow:
         self.graph = nx.DiGraph()
         self.env = jinja2.Environment()
         self.client = OpenAI()
-        logger.debug("GenSphere initialized.")
+        logger.debug("GenFlow initialized.")
 
     def parse_yaml(self):
         """

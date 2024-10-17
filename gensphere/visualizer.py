@@ -1,10 +1,10 @@
-# Visualizer.py
+# visualizer.py
 
 import dash
 from dash import html, dcc, Input, Output, State
 import dash_cytoscape as cyto
 import os
-from GenSphere import graph_builder
+from gensphere import graph_builder
 import inspect
 import logging
 import importlib
@@ -20,7 +20,7 @@ if not logger.hasHandlers():
 
 
 class Visualizer:
-    def __init__(self, yaml_file=None, functions_filename=None, structured_output_schema_filename=None):
+    def __init__(self, yaml_file=None, functions_filename=None, structured_output_schema_filename=None,address='127.0.0.1', port=8050):
         """
         Initializes the Visualizer class with optional filenames for the YAML file, functions.py, and structured_output_schema.py.
 
@@ -32,6 +32,8 @@ class Visualizer:
         self.yaml_file = yaml_file
         self.functions_filename = functions_filename
         self.structured_output_schema_filename = structured_output_schema_filename
+        self.address=address
+        self.port=port
 
         # Try to dynamically import the user-provided function and schema files
         try:
@@ -224,7 +226,7 @@ class Visualizer:
 
         # Define the layout
         app.layout = html.Div([
-            html.H1('GenSphere Workflow Visualizer', style={'color': '#fff'}),
+            html.H1('gensphere Workflow Visualizer', style={'color': '#fff'}),
             html.Div([
                 html.Label('YAML File Path:', style={'color': '#fff'}),
                 dcc.Input(id='yaml-file-input', value=self.yaml_file, type='text', style={'width': '300px'}),
@@ -377,4 +379,4 @@ class Visualizer:
             return "Click on a node to see details."
 
         # Start the server
-        app.run_server(debug=False)
+        app.run_server(debug=False,host=self.address, port=self.port)

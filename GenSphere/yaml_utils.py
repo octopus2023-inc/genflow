@@ -1,4 +1,4 @@
-#YmlUtils.py
+#ymal_utils.py
 
 import yaml
 import os
@@ -421,8 +421,8 @@ def validate_yaml(
                 error_msgs.append(
                     f"Node '{node_name}' of type 'llm_service' references service {service} but only 'openai' is currently supported.")
                 validated = False
-            if structured_output_schema in node_data:
-                schema=node_data['structured_output_schema']
+            if 'structured_output_schema' in node_data:
+                structured_output_schema_name=node_data['structured_output_schema']
                 try:
                     module = importlib.import_module(structured_output_schema_filename)
                     schema_class = getattr(module, structured_output_schema_name)
