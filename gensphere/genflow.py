@@ -48,7 +48,9 @@ class GenFlow:
         """
         # Validate the YAML data before parsing
 
-        validated, error_msgs, node_outputs=validate_yaml(self.yaml_file)
+        validated, error_msgs, node_outputs=validate_yaml(self.yaml_file,
+                                                          self.functions_filename,
+                                                          self.structured_output_schema_filename)
         if validated:
             logger.info(f"yaml file {self.yaml_file} passed all consistency checks")
         else:
@@ -401,12 +403,12 @@ class Node:
             dict: Dictionary of outputs from the function.
         """
         try:
-            module = importlib.import_module(self.functions_filename)
+            module = importlib.import_module(self.flow.functions_filename)
             func = getattr(module, self.node_data['function'])
         except ImportError as e:
-            raise ImportError(f"Error importing module {self.functions_filename}: {e}")
+            raise ImportError(f"Error importing module {self.flow.functions_filename}: {e}")
         except AttributeError as e:
-            raise AttributeError(f"Function '{self.node_data['function']}' not found in {self.functions_filename} module.")
+            raise AttributeError(f"Function '{self.node_data['function']}' not found in {self.flow.functions_filename} module.")
 
         # Check if function has proper docstrings and type annotations
         signature = inspect.signature(func)
@@ -504,12 +506,12 @@ class Node:
                     func=run_langchain_tool
                 else:
                     try:
-                        module = importlib.import_module(self.functions_filename)
+                        module = importlib.import_module(self.flow.functions_filename)
                         func = getattr(module, tool_name)
                     except ImportError as e:
-                        raise ImportError(f"Error importing module {self.functions_filename}: {e}")
+                        raise ImportError(f"Error importing module {self.flow.functions_filename}: {e}")
                     except AttributeError as e:
-                        raise AttributeError(f"Function '{tool_name}' not found in {self.functions_filename} module.")
+                        raise AttributeError(f"Function '{tool_name}' not found in {self.flow.functions_filename} module.")
 
                     # Check if function has proper docstrings and type annotations
                     if not func.__doc__:
@@ -615,12 +617,12 @@ class Node:
             # Structured outputs
             # Get the schema from your structured_output_schema file
             try:
-                module = importlib.import_module(self.structured_output_schema_filename)
+                module = importlib.import_module(self.flow.structured_output_schema_filename)
                 schema_class = getattr(module, structured_output_schema_name)
             except ImportError as e:
-                raise ImportError(f"Error importing module {self.structured_output_schema_filename}: {e}")
+                raise ImportError(f"Error importing module {self.flow.structured_output_schema_filename}: {e}")
             except AttributeError as e:
-                raise AttributeError(f"Schema '{structured_output_schema_name}' not found in '{self.structured_output_schema_filename}' module.")
+                raise AttributeError(f"Schema '{structured_output_schema_name}' not found in '{self.flow.structured_output_schema_filename}' module.")
 
 
             # Call OpenAI API with response_format

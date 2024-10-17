@@ -35,7 +35,7 @@ class Hub:
             with open(self.yaml_file, 'r') as f:
                 yaml_content_str = f.read()
             yaml_content = yaml.safe_load(yaml_content_str)
-            validated, error_msgs, node_outputs = validate_yaml(self.yaml_file)
+            validated, error_msgs, node_outputs = validate_yaml(self.yaml_file,self.functions_file,self.schema_file)
             if validated:
                 logger.info(f"yaml file {self.yaml_file} passed all consistency checks")
             else:
