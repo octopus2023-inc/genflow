@@ -30,7 +30,7 @@ if __name__ == '__main__':
         logger.info("Combined YAML Data:")
         pprint.pprint(combined_yaml_data)
 
-        # Initialize GenFlow with the combined YAML data
+        # Initialize GenSphere with the combined YAML data
         flow = GenFlow(combined_yaml_data)
         flow.parse_yaml()
 

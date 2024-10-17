@@ -15,71 +15,32 @@ from typing import Union, Set
 from composio_openai import ComposioToolSet, App, Action
 from langchain_core.utils.function_calling import convert_to_openai_function
 import textwrap
-# Import YmlCompose
-from GenFlow.yml_compose import YmlCompose
+# Import YmlCompose and validate_yaml
+from GenSphere.YmlUtils import YmlCompose, load_yaml_file, has_yml_flow_nodes, validate_yaml
 
 # Load environment variables
 load_dotenv()
 
 # Module-level logger
 logger = logging.getLogger(__name__)
+logging.getLogger('composio').setLevel(logging.WARNING)
 
 class GenFlow:
     """
     Class to parse YAML data, construct an execution graph, and execute nodes.
     """
 
-    def __init__(self, yaml_file):
+    def __init__(self, yaml_file,functions_filename=None,structured_output_schema_filename=None):
         self.yaml_file = yaml_file  # Path to the main YAML file
-        self.yaml_data = self.load_yaml_file(yaml_file)
+        self.functions_filename=functions_filename
+        self.structured_output_schema_filename=structured_output_schema_filename
+        self.yaml_data = load_yaml_file(yaml_file)
         self.nodes = {}        # Maps node names to Node instances
         self.outputs = {}      # Stores outputs from nodes
         self.graph = nx.DiGraph()
         self.env = jinja2.Environment()
         self.client = OpenAI()
-        logger.debug("GenFlow initialized.")
-
-    def load_yaml_file(self, yaml_file):
-        """
-        Loads the YAML data from a file.
-
-        Args:
-            yaml_file (str): Path to the YAML file.
-
-        Returns:
-            dict: The YAML data.
-        """
-        if not os.path.exists(yaml_file):
-            raise FileNotFoundError(f"YAML file '{yaml_file}' does not exist.")
-
-        with open(yaml_file, 'r') as f:
-            try:
-                data = yaml.safe_load(f)
-            except yaml.YAMLError as e:
-                raise ValueError(f"Error parsing YAML file '{yaml_file}': {e}")
-        return data
-
-    def has_yml_flow_nodes(self, yaml_data):
-        """
-        Recursively checks if the YAML data contains any 'yml_flow' nodes.
-
-        Args:
-            yaml_data (dict): The YAML data to check.
-
-        Returns:
-            bool: True if 'yml_flow' nodes are present, False otherwise.
-        """
-        nodes = yaml_data.get('nodes', [])
-        for node_data in nodes:
-            node_type = node_data.get('type')
-            if node_type == 'yml_flow':
-                return True
-            elif node_type in ['function_call', 'llm_service']:
-                continue
-            else:
-                # If node_type is not recognized, raise an error
-                raise ValueError(f"Unknown node type '{node_type}' in node '{node_data.get('name')}'.")
-        return False
+        logger.debug("GenSphere initialized.")
 
     def parse_yaml(self):
         """
@@ -87,11 +48,14 @@ class GenFlow:
         """
         # Validate the YAML data before parsing
 
-        self.validate_yaml(self.yaml_data, self.yaml_file)
-        logger.info(f"yaml file {self.yaml_file} passed all validation steps")
+        validated, error_msgs, node_outputs=validate_yaml(self.yaml_file)
+        if validated:
+            logger.info(f"yaml file {self.yaml_file} passed all consistency checks")
+        else:
+            raise Exception(f"yaml file {self.yaml_file} didn't pass consistency checks.\nError messages: {error_msgs}")
 
         # Check if there are any 'yml_flow' nodes
-        if self.has_yml_flow_nodes(self.yaml_data):
+        if has_yml_flow_nodes(self.yaml_data):
             logger.info("Detected 'yml_flow' nodes. Composing YAML files using YmlCompose.")
             # Compose the YAML data into a single flow
             yml_composer = YmlCompose(self.yaml_file)
@@ -111,288 +75,6 @@ class GenFlow:
 
         # Build the execution graph
         self.build_graph()
-
-    def validate_yaml(self, yaml_data, yaml_file, parent_node_names=None, visited_files=None, parent_params=None):
-        """
-        Validates the YAML data and any associated sub-flows for consistency and errors.
-
-        Args:
-            yaml_data (dict): The YAML data to validate.
-            yaml_file (str): Path to the YAML file being validated.
-            parent_node_names (set): Set of node names from the parent flow to detect duplicates.
-            visited_files (set): Set of visited YAML file paths to prevent circular references.
-            parent_params (set): Set of parameter names passed from the parent flow.
-        """
-        if parent_node_names is None:
-            parent_node_names = set()
-        if visited_files is None:
-            visited_files = set()
-        if parent_params is None:
-            parent_params = set()
-
-        logger.debug(f"Validating YAML file '{yaml_file}'")
-
-        # Get absolute path of the yaml_file
-        yaml_file_abs = os.path.abspath(yaml_file)
-
-        # Prevent circular references
-        if yaml_file_abs in visited_files:
-            raise ValueError(f"Circular reference detected in YAML file '{yaml_file}'.")
-        visited_files.add(yaml_file_abs)
-
-        # Check if yaml_data is a dictionary
-        if not isinstance(yaml_data, dict):
-            raise ValueError(f"YAML file '{yaml_file}' must contain a dictionary at the top level.")
-
-        # Check if 'nodes' key exists
-        if 'nodes' not in yaml_data:
-            raise ValueError(f"YAML file '{yaml_file}' must contain a 'nodes' key.")
-
-        nodes = yaml_data['nodes']
-
-        # Check if 'nodes' is a list
-        if not isinstance(nodes, list):
-            raise ValueError(f"The 'nodes' key in YAML file '{yaml_file}' must be a list.")
-
-        node_names = set()
-
-        for node_data in nodes:
-            # Check if node_data is a dictionary
-            if not isinstance(node_data, dict):
-                raise ValueError(f"A node in YAML file '{yaml_file}' is not a dictionary.")
-
-            node_name = node_data.get('name')
-            node_type = node_data.get('type')
-            params = node_data.get('params', {})
-            outputs = node_data.get('outputs', [])
-
-            # Check for 'name' and 'type'
-            if not node_name:
-                raise ValueError(f"A node in YAML file '{yaml_file}' is missing the 'name' field.")
-            if not node_type:
-                raise ValueError(f"Node '{node_name}' in YAML file '{yaml_file}' is missing the 'type' field.")
-
-            # Check for duplicate node names
-            if node_name in node_names or node_name in parent_node_names:
-                raise ValueError(f"Duplicate node name '{node_name}' found in YAML file '{yaml_file}'.")
-            node_names.add(node_name)
-
-            # Check for valid node types
-            valid_node_types = {'function_call', 'llm_service', 'yml_flow'}
-            if node_type not in valid_node_types:
-                raise ValueError(f"Invalid node type '{node_type}' in node '{node_name}' in YAML file '{yaml_file}'.")
-
-            # Validate 'function_call' nodes
-            if node_type == 'function_call':
-                function_name = node_data.get('function')
-                if not function_name:
-                    raise ValueError(f"Node '{node_name}' of type 'function_call' must have a 'function' field in YAML file '{yaml_file}'.")
-                try:
-                    module = importlib.import_module('functions')
-                    func = getattr(module, function_name)
-                except (ImportError, AttributeError):
-                    raise ValueError(f"Function '{function_name}' not found in 'functions.py' for node '{node_name}' in YAML file '{yaml_file}'.")
-
-            # Validate 'llm_service' nodes
-            if node_type == 'llm_service':
-                service = node_data.get('service')
-                if not service:
-                    raise ValueError(f"Node '{node_name}' of type 'llm_service' must have a 'service' field in YAML file '{yaml_file}'.")
-                if 'tools' in node_data:
-                    tools = node_data['tools']
-                    for i, tool in enumerate(tools):
-                        # Check if COMPOSIO tools are valid
-                        if tool.startswith('COMPOSIO.'):
-                            tool_name = tool.split('COMPOSIO.')[1]
-                            composio_toolset = ComposioToolSet()
-                            try:
-                                _ = composio_toolset.get_tools(actions=[tool_name])[0]
-                            except Exception as e:
-                                print(f"COMPOSIO tool {tool_name} not valid. Please check COMPOSIO documentation for valid tools. \n COMPOSIO error message: {e}")
-                        # Check if LANGCHAIN tools are valid
-                        elif tool.startswith('LANGCHAIN.'):
-                            tool_name = tool.split('LANGCHAIN.')[1]
-                            module = importlib.import_module('langchain_community.tools')
-                            try:
-                                _ = getattr(module, tool_name)
-                            except:
-                                print(f"Unable to import {tool_name} from langchain_community.tools. Please check Langchain's documentation.\n Langchain error message: {e}")
-            # Validate 'yml_flow' nodes
-            if node_type == 'yml_flow':
-                yml_file_sub = node_data.get('yml_file')
-                if not yml_file_sub:
-                    raise ValueError(f"Node '{node_name}' of type 'yml_flow' must have a 'yml_file' field in YAML file '{yaml_file}'.")
-                # Resolve the subflow yaml file path relative to the current yaml file
-                yml_file_sub_path = os.path.join(os.path.dirname(yaml_file), yml_file_sub)
-                # Check if the YAML file exists
-                if not os.path.exists(yml_file_sub_path):
-                    raise FileNotFoundError(f"YAML file '{yml_file_sub_path}' specified in node '{node_name}' does not exist.")
-                # Load the sub-flow YAML file
-                sub_yaml_data = self.load_yaml_file(yml_file_sub_path)
-                # Get the 'params' passed to the sub-flow
-                sub_flow_params = node_data.get('params', {})
-                sub_flow_param_names = set(sub_flow_params.keys())
-
-                # Collect all parameter names used in the sub-flow
-                used_params_in_sub_flow = self.collect_used_params(sub_yaml_data)
-
-                # Check that each parameter passed in is used in the sub-flow
-                unused_params = sub_flow_param_names - used_params_in_sub_flow
-                if unused_params:
-                    raise ValueError(f"Parameters {unused_params} passed to sub-flow '{yml_file_sub_path}' are not used in the sub-flow.")
-
-                # Collect all parameters used in the sub-flow but not defined
-                sub_flow_parent_params = parent_params.union(sub_flow_param_names)
-                undefined_params = used_params_in_sub_flow - sub_flow_param_names - sub_flow_parent_params
-                if undefined_params:
-                    raise ValueError(f"Sub-flow '{yml_file_sub_path}' uses undefined parameters: {undefined_params}")
-
-                # Pass down parent parameters to the sub-flow
-                new_parent_params = sub_flow_parent_params
-                # Recursively validate the sub-flow
-                self.validate_yaml(sub_yaml_data, yml_file_sub_path, parent_node_names.union(node_names), visited_files, new_parent_params)
-
-                # Check that outputs specified are produced by the sub-flow
-                sub_flow_node_outputs = self.collect_sub_flow_outputs(sub_yaml_data)
-                specified_outputs = node_data.get('outputs', [])
-                missing_outputs = set(specified_outputs) - sub_flow_node_outputs
-                if missing_outputs:
-                    raise ValueError(f"Outputs {missing_outputs} specified in 'outputs' of 'yml_flow' node '{node_name}' are not produced by the sub-flow '{yml_file_sub_path}'.")
-
-            # Validate parameters and outputs
-            if not isinstance(params, dict):
-                raise ValueError(f"Parameters in node '{node_name}' must be a dictionary in YAML file '{yaml_file}'.")
-            if not isinstance(outputs, list):
-                raise ValueError(f"Outputs in node '{node_name}' must be a list in YAML file '{yaml_file}'.")
-            # Check for duplicate parameter names
-            param_names = set(params.keys())
-            if len(param_names) != len(params):
-                raise ValueError(f"Duplicate parameter names found in node '{node_name}' in YAML file '{yaml_file}'.")
-            # Check for duplicate output names
-            if len(set(outputs)) != len(outputs):
-                raise ValueError(f"Duplicate output names found in node '{node_name}' in YAML file '{yaml_file}'.")
-
-        # After collecting all node names, check for references to undefined nodes
-        for node_data in nodes:
-            node_name = node_data['name']
-            params = node_data.get('params', {})
-            # Collect all referenced nodes in parameters
-            referenced_nodes = self.collect_referenced_nodes(params)
-            undefined_nodes = referenced_nodes - node_names - parent_node_names
-            if undefined_nodes:
-                raise ValueError(f"Node '{node_name}' in YAML file '{yaml_file}' references undefined nodes: {undefined_nodes}")
-
-        # Build a temporary graph to check for cycles
-        temp_graph = nx.DiGraph()
-        for node_data in nodes:
-            node_name = node_data['name']
-            temp_graph.add_node(node_name)
-        for node_data in nodes:
-            node_name = node_data['name']
-            params = node_data.get('params', {})
-            referenced_nodes = self.collect_referenced_nodes(params)
-            for ref_node in referenced_nodes:
-                if ref_node in node_names:
-                    temp_graph.add_edge(ref_node, node_name)
-        if not nx.is_directed_acyclic_graph(temp_graph):
-            raise ValueError(f"The workflow graph in YAML file '{yaml_file}' has cycles.")
-
-
-    def collect_used_params(self, yaml_data) -> Set[str]:
-        """
-        Collects all parameter names used in the YAML data.
-
-        Args:
-            yaml_data (dict): The YAML data.
-
-        Returns:
-            Set[str]: A set of parameter names used in the YAML data.
-        """
-        used_params = set()
-
-        nodes = yaml_data.get('nodes', [])
-        for node_data in nodes:
-            params = node_data.get('params', {})
-            used_params.update(self.collect_referenced_params(params))
-
-        return used_params
-
-    def collect_referenced_params(self, params) -> Set[str]:
-        """
-        Collects all parameter names used in the parameters.
-
-        Args:
-            params (dict): Parameters dictionary.
-
-        Returns:
-            Set[str]: A set of parameter names used.
-        """
-        referenced_params = set()
-
-        def traverse(value):
-            if isinstance(value, str):
-                # Extract parameter references from templated strings
-                import re
-                pattern = r"\{\{\s*([\w_]+)\s*\}\}"
-                matches = re.findall(pattern, value)
-                referenced_params.update(matches)
-            elif isinstance(value, dict):
-                for v in value.values():
-                    traverse(v)
-            elif isinstance(value, list):
-                for item in value:
-                    traverse(item)
-
-        traverse(params)
-        return referenced_params
-
-    def collect_sub_flow_outputs(self, yaml_data) -> Set[str]:
-        """
-        Collects all outputs produced by nodes in the sub-flow.
-
-        Args:
-            yaml_data (dict): The YAML data.
-
-        Returns:
-            Set[str]: A set of output names produced in the sub-flow.
-        """
-        outputs = set()
-
-        nodes = yaml_data.get('nodes', [])
-        for node_data in nodes:
-            node_outputs = node_data.get('outputs', [])
-            outputs.update(node_outputs)
-
-        return outputs
-
-    def collect_referenced_nodes(self, params) -> Set[str]:
-        """
-        Collects all node names referenced in the parameters.
-
-        Args:
-            params (dict): Parameters dictionary.
-
-        Returns:
-            Set[str]: A set of referenced node names.
-        """
-        referenced_nodes = set()
-
-        def traverse(value):
-            if isinstance(value, str):
-                # Extract node references from templated strings
-                import re
-                pattern = r"\{\{\s*([\w_]+)\."
-                matches = re.findall(pattern, value)
-                referenced_nodes.update(matches)
-            elif isinstance(value, dict):
-                for v in value.values():
-                    traverse(v)
-            elif isinstance(value, list):
-                for item in value:
-                    traverse(item)
-
-        traverse(params)
-        return referenced_nodes
 
     def build_graph(self):
         """
@@ -719,12 +401,12 @@ class Node:
             dict: Dictionary of outputs from the function.
         """
         try:
-            module = importlib.import_module('functions')
+            module = importlib.import_module(self.functions_filename)
             func = getattr(module, self.node_data['function'])
         except ImportError as e:
-            raise ImportError(f"Error importing module 'functions': {e}")
+            raise ImportError(f"Error importing module {self.functions_filename}: {e}")
         except AttributeError as e:
-            raise AttributeError(f"Function '{self.node_data['function']}' not found in 'functions' module.")
+            raise AttributeError(f"Function '{self.node_data['function']}' not found in {self.functions_filename} module.")
 
         # Check if function has proper docstrings and type annotations
         signature = inspect.signature(func)
@@ -822,12 +504,12 @@ class Node:
                     func=run_langchain_tool
                 else:
                     try:
-                        module = importlib.import_module('functions')
+                        module = importlib.import_module(self.functions_filename)
                         func = getattr(module, tool_name)
                     except ImportError as e:
-                        raise ImportError(f"Error importing module 'functions': {e}")
+                        raise ImportError(f"Error importing module {self.functions_filename}: {e}")
                     except AttributeError as e:
-                        raise AttributeError(f"Function '{tool_name}' not found in 'functions' module.")
+                        raise AttributeError(f"Function '{tool_name}' not found in {self.functions_filename} module.")
 
                     # Check if function has proper docstrings and type annotations
                     if not func.__doc__:
@@ -931,14 +613,15 @@ class Node:
 
         elif structured_output_schema_name:
             # Structured outputs
-            # Get the schema from structured_output_schema.py
+            # Get the schema from your structured_output_schema file
             try:
-                module = importlib.import_module('structured_output_schema')
+                module = importlib.import_module(self.structured_output_schema_filename)
                 schema_class = getattr(module, structured_output_schema_name)
             except ImportError as e:
-                raise ImportError(f"Error importing module 'structured_output_schema': {e}")
+                raise ImportError(f"Error importing module {self.structured_output_schema_filename}: {e}")
             except AttributeError as e:
-                raise AttributeError(f"Schema '{structured_output_schema_name}' not found in 'structured_output_schema' module.")
+                raise AttributeError(f"Schema '{structured_output_schema_name}' not found in '{self.structured_output_schema_filename}' module.")
+
 
             # Call OpenAI API with response_format
             try:

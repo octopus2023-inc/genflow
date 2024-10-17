@@ -50,7 +50,7 @@ def extract_referenced_nodes(template_str: str) -> Set[str]:
         Set[str]: A set of referenced node names.
     """
     import re
-    pattern = r"\{\{\s*([\w_][\w_\d]*)\.[\w_]+\s*\}\}"
+    pattern = r"\{\{\s*([\w_][\w_\d]*)\.[^\}]*\}\}"
     matches = re.findall(pattern, template_str)
     logger.debug(f"Extracted referenced nodes from '{template_str}': {matches}")
     return set(matches)

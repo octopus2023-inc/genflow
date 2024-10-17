@@ -16,10 +16,10 @@ logging.basicConfig(
 
 #logger = logging.getLogger(__name__)
 
-from GenFlow.GenFlow import GenFlow
-logger = logging.getLogger('GenFlow')
+from GenSphere.GenFlow import GenFlow
+logger = logging.getLogger('GenSphere')
 
-from GenFlow.yml_compose import YmlCompose
+from GenSphere.YmlUtils import YmlCompose
 import pprint
 from dotenv import load_dotenv
 import os
@@ -35,7 +35,7 @@ if __name__ == '__main__':
         logger.info("Combined YAML Data:")
         pprint.pprint(combined_yaml_data)
 
-        # Initialize GenFlow with the combined YAML data
+        # Initialize GenSphere with the combined YAML data
         flow = GenFlow('combined.yaml')
         flow.parse_yaml()
 
